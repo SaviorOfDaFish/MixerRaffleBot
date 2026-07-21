@@ -109,8 +109,8 @@ db.exec(`
 `);
 
 /*
- * Upgrade databases created by the earlier starter version.
- * This preserves all existing data stored on the Railway Volume.
+ * Upgrade databases created by earlier versions.
+ * This preserves existing data on the Railway Volume.
  */
 const guessColumns = db
   .prepare('PRAGMA table_info(guesses)')
@@ -226,10 +226,8 @@ function getNextTicketNumber() {
 }
 
 /*
- * Finds the Thursday at 10:00 PM Mountain Time
- * connected to the week in which the raffle was started.
- *
- * A raffle started after 10 PM Thursday closes the following Thursday.
+ * Finds Thursday at 10:00 PM Mountain Time for the raffle week.
+ * A raffle started after Thursday at 10 PM closes the following Thursday.
  */
 function getScheduledCloseTime(raffle) {
   const startTime = DateTime
@@ -533,6 +531,104 @@ const awardCorrectGuess = db.transaction(
   }
 );
 
+/*
+ * Completely deletes the currently open raffle and restores the
+ * next ticket number to the first ticket awarded during that raffle.
+ *
+ * This is intended for test raffles or accidental starts.
+ */
+const resetActiveRaffleTransaction = db.transaction(
+  (raffleId) => {
+    const raffle = db
+      .prepare(`
+        SELECT *
+        FROM raffles
+        WHERE id = ?
+          AND status = 'open'
+      `)
+      .get(raffleId);
+
+    if (!raffle) {
+      return {
+        reset: false,
+        reason: 'not_found'
+      };
+    }
+
+    const ticketInfo = db
+      .prepare(`
+        SELECT
+          MIN(ticket_number) AS first_ticket,
+          COUNT(*) AS ticket_count
+        FROM tickets
+        WHERE raffle_id = ?
+      `)
+      .get(raffleId);
+
+    const guessesDeleted = db
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM guesses
+        WHERE raffle_id = ?
+      `)
+      .get(raffleId).count;
+
+    const winnersDeleted = db
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM raffle_winners
+        WHERE raffle_id = ?
+      `)
+      .get(raffleId).count;
+
+    db.prepare(`
+      DELETE FROM tickets
+      WHERE raffle_id = ?
+    `).run(raffleId);
+
+    db.prepare(`
+      DELETE FROM raffle_winners
+      WHERE raffle_id = ?
+    `).run(raffleId);
+
+    db.prepare(`
+      DELETE FROM guesses
+      WHERE raffle_id = ?
+    `).run(raffleId);
+
+    db.prepare(`
+      DELETE FROM raffles
+      WHERE id = ?
+    `).run(raffleId);
+
+    if (
+      ticketInfo.first_ticket !== null &&
+      Number.isSafeInteger(ticketInfo.first_ticket)
+    ) {
+      db.prepare(`
+        UPDATE settings
+        SET value = ?
+        WHERE key = 'next_ticket_number'
+      `).run(
+        String(ticketInfo.first_ticket)
+      );
+    }
+
+    return {
+      reset: true,
+      raffleId,
+      cardName: raffle.card_name,
+      guessesDeleted,
+      winnersDeleted,
+      ticketsDeleted: ticketInfo.ticket_count,
+      restoredTicketNumber:
+        ticketInfo.first_ticket !== null
+          ? ticketInfo.first_ticket
+          : getNextTicketNumber()
+    };
+  }
+);
+
 const closeRaffleTransaction = db.transaction(
   (raffleId, closedAt) => {
     const raffle = db
@@ -587,9 +683,6 @@ async function sendRaffleClosingMessages(
 ) {
   const summary = buildOwnerSummary(raffle);
 
-  /*
-   * Send the private summary directly to the bot owner.
-   */
   try {
     const owner = await client.users.fetch(
       process.env.OWNER_ID
@@ -609,9 +702,6 @@ async function sendRaffleClosingMessages(
     );
   }
 
-  /*
-   * Send the same summary to the private admin log channel.
-   */
   try {
     const adminChannel =
       await client.channels.fetch(
@@ -640,10 +730,6 @@ async function sendRaffleClosingMessages(
     );
   }
 
-  /*
-   * Tell players that guesses are now closed.
-   * The answer and winners remain private until Friday.
-   */
   try {
     const guessChannel =
       await client.channels.fetch(
@@ -763,15 +849,8 @@ client.once(
       'Automatic raffle closing: Thursday at 10:00 PM Mountain Time'
     );
 
-    /*
-     * Check immediately after startup.
-     * This catches a missed close if Railway was restarting at 10 PM.
-     */
     await checkForScheduledRaffleClose();
 
-    /*
-     * Check once every minute.
-     */
     setInterval(
       checkForScheduledRaffleClose,
       60 * 1000
@@ -964,6 +1043,104 @@ client.on(
             )}`,
           flags: MessageFlags.Ephemeral
         });
+
+        return;
+      }
+
+      if (
+        interaction.commandName ===
+        'resetraffle'
+      ) {
+        if (!isOwner(interaction)) {
+          await interaction.reply({
+            content:
+              'Only the raffle owner can reset a raffle.',
+            flags: MessageFlags.Ephemeral
+          });
+
+          return;
+        }
+
+        const confirmation = interaction.options
+          .getString('confirm', true)
+          .trim();
+
+        if (confirmation !== 'RESET') {
+          await interaction.reply({
+            content:
+              'Reset cancelled. Enter **RESET** in all capital letters to confirm.',
+            flags: MessageFlags.Ephemeral
+          });
+
+          return;
+        }
+
+        const activeRaffle = getActiveRaffle();
+
+        if (!activeRaffle) {
+          await interaction.reply({
+            content:
+              'There is no active raffle to reset.',
+            flags: MessageFlags.Ephemeral
+          });
+
+          return;
+        }
+
+        const resetResult =
+          resetActiveRaffleTransaction(
+            activeRaffle.id
+          );
+
+        if (!resetResult.reset) {
+          await interaction.reply({
+            content:
+              'The raffle could not be reset because it is no longer active.',
+            flags: MessageFlags.Ephemeral
+          });
+
+          return;
+        }
+
+        await interaction.reply({
+          content:
+            `🗑️ **Raffle #${resetResult.raffleId} was reset.**\n\n` +
+            `**Card:** ${resetResult.cardName}\n` +
+            `**Guesses deleted:** ${resetResult.guessesDeleted}\n` +
+            `**Winners deleted:** ${resetResult.winnersDeleted}\n` +
+            `**Tickets deleted:** ${resetResult.ticketsDeleted}\n` +
+            `**Next physical ticket restored to:** ${resetResult.restoredTicketNumber}\n\n` +
+            'You may now use `/startraffle` to begin a new raffle.',
+          flags: MessageFlags.Ephemeral
+        });
+
+        try {
+          const adminChannel =
+            await client.channels.fetch(
+              process.env.ADMIN_CHANNEL_ID
+            );
+
+          if (
+            adminChannel &&
+            adminChannel.isTextBased()
+          ) {
+            await adminChannel.send({
+              content:
+                `🗑️ **Raffle Reset**\n` +
+                `Raffle #${resetResult.raffleId} (${resetResult.cardName}) was reset by <@${interaction.user.id}>.\n` +
+                `Deleted ${resetResult.guessesDeleted} guesses, ${resetResult.winnersDeleted} winners, and ${resetResult.ticketsDeleted} tickets.\n` +
+                `Next physical ticket: **${resetResult.restoredTicketNumber}**`,
+              allowedMentions: {
+                users: [interaction.user.id]
+              }
+            });
+          }
+        } catch (error) {
+          console.error(
+            'Could not log raffle reset in admin channel:',
+            error
+          );
+        }
 
         return;
       }
