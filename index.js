@@ -944,6 +944,61 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  /*
+   * Dynamically fills the Card Number field for /guess.
+   * Only cards currently attached to the active raffle are shown.
+   */
+  if (interaction.isAutocomplete()) {
+    try {
+      if (interaction.commandName !== 'guess') {
+        await interaction.respond([]);
+        return;
+      }
+
+      const focusedOption = interaction.options.getFocused(true);
+
+      if (focusedOption.name !== 'card_number') {
+        await interaction.respond([]);
+        return;
+      }
+
+      const raffle = getActiveRaffle();
+
+      if (!raffle) {
+        await interaction.respond([]);
+        return;
+      }
+
+      const availableCardNumbers = [
+        1,
+        ...getBonusCards(raffle.id).map((card) => card.card_number)
+      ];
+
+      const typedValue = String(focusedOption.value || '')
+        .replace(/[^0-9]/g, '');
+
+      const matchingCards = availableCardNumbers
+        .filter((cardNumber) =>
+          typedValue === '' || String(cardNumber).includes(typedValue)
+        )
+        .slice(0, 25)
+        .map((cardNumber) => ({
+          name: `Card #${cardNumber}`,
+          value: cardNumber
+        }));
+
+      await interaction.respond(matchingCards);
+    } catch (error) {
+      console.error('Autocomplete error:', error);
+
+      if (!interaction.responded) {
+        await interaction.respond([]).catch(() => {});
+      }
+    }
+
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
@@ -1256,7 +1311,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
 
-      const cardNumber = interaction.options.getInteger('card_number') || 1;
+      const cardNumber = interaction.options.getInteger('card_number', true);
       const card = getCardForRaffle(raffle, cardNumber);
 
       if (!card) {
@@ -1573,4 +1628,4 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN)
