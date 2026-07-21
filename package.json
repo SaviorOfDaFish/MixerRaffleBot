@@ -1,7 +1,7 @@
 {
   "name": "mixed-gaming-raffle-bot",
-  "version": "1.2.2",
-  "description": "Discord bot for the Mixed Gaming blurred MTG raffle.",
+  "version": "1.3.0",
+  "description": "Discord bot for the Mixed Gaming multi-card blurred MTG raffle.",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
