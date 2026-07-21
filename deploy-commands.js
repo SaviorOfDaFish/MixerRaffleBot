@@ -34,19 +34,21 @@ const commands = [
     .addStringOption((option) =>
       option
         .setName('card')
-        .setDescription('The full correct card name.')
+        .setDescription('The full correct name of Card #1.')
         .setRequired(true)
     )
     .addStringOption((option) =>
       option
         .setName('aliases')
-        .setDescription('Optional accepted answers separated by commas.')
+        .setDescription(
+          'Optional accepted answers separated by commas.'
+        )
         .setRequired(false)
     ),
 
   new SlashCommandBuilder()
     .setName('addcard')
-    .setDescription('Add another blurred card to the active weekly raffle.')
+    .setDescription('Add another blurred card to the active raffle.')
     .addStringOption((option) =>
       option
         .setName('card')
@@ -56,35 +58,45 @@ const commands = [
     .addStringOption((option) =>
       option
         .setName('aliases')
-        .setDescription('Optional accepted answers separated by commas.')
+        .setDescription(
+          'Optional accepted answers separated by commas.'
+        )
         .setRequired(false)
     ),
 
   new SlashCommandBuilder()
     .setName('resetraffle')
-    .setDescription('Delete the active raffle and restore its ticket numbers.')
+    .setDescription(
+      'Delete the active raffle and restore its ticket numbers.'
+    )
     .addStringOption((option) =>
       option
         .setName('confirm')
-        .setDescription('Type RESET in all capital letters.')
+        .setDescription(
+          'Type RESET in all capital letters.'
+        )
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName('guess')
-    .setDescription('Privately guess one of the active blurred MTG cards.')
-    .addStringOption((option) =>
-      option
-        .setName('card')
-        .setDescription('Your full card-name guess.')
-        .setRequired(true)
+    .setDescription(
+      'Privately guess one of the active blurred MTG cards.'
     )
     .addIntegerOption((option) =>
       option
         .setName('card_number')
-        .setDescription('Which card you are guessing. Defaults to Card #1.')
-        .setMinValue(1)
-        .setRequired(false)
+        .setDescription(
+          'Choose one of the cards currently in the raffle.'
+        )
+        .setRequired(true)
+        .setAutocomplete(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('card')
+        .setDescription('Enter the full MTG card name.')
+        .setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -93,11 +105,14 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('rafflestatus')
-    .setDescription('View the private status of the active raffle.')
+    .setDescription(
+      'View the private status of the active raffle.'
+    )
 ].map((command) => command.toJSON());
 
-const rest = new REST({ version: '10' })
-  .setToken(process.env.DISCORD_TOKEN);
+const rest = new REST({
+  version: '10'
+}).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
@@ -108,7 +123,9 @@ const rest = new REST({ version: '10' })
         process.env.CLIENT_ID,
         process.env.GUILD_ID
       ),
-      { body: commands }
+      {
+        body: commands
+      }
     );
 
     console.log('Slash commands registered successfully.');
