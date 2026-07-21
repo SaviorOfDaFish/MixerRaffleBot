@@ -40,79 +40,80 @@ const commands = [
     .addStringOption((option) =>
       option
         .setName('aliases')
-        .setDescription(
-          'Optional accepted answers separated by commas.'
-        )
+        .setDescription('Optional accepted answers separated by commas.')
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('addcard')
+    .setDescription('Add another blurred card to the active weekly raffle.')
+    .addStringOption((option) =>
+      option
+        .setName('card')
+        .setDescription('The full correct name of the new card.')
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('aliases')
+        .setDescription('Optional accepted answers separated by commas.')
         .setRequired(false)
     ),
 
   new SlashCommandBuilder()
     .setName('resetraffle')
-    .setDescription(
-      'Delete the active raffle and restore its ticket numbers.'
-    )
+    .setDescription('Delete the active raffle and restore its ticket numbers.')
     .addStringOption((option) =>
       option
         .setName('confirm')
-        .setDescription(
-          'Type RESET in all capital letters.'
-        )
+        .setDescription('Type RESET in all capital letters.')
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName('guess')
-    .setDescription(
-      'Privately guess the current blurred MTG card.'
-    )
+    .setDescription('Privately guess one of the active blurred MTG cards.')
     .addStringOption((option) =>
       option
         .setName('card')
         .setDescription('Your full card-name guess.')
         .setRequired(true)
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName('card_number')
+        .setDescription('Which card you are guessing. Defaults to Card #1.')
+        .setMinValue(1)
+        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
     .setName('mytickets')
-    .setDescription(
-      'View your raffle ticket numbers.'
-    ),
+    .setDescription('View your raffle ticket numbers.'),
 
   new SlashCommandBuilder()
     .setName('rafflestatus')
-    .setDescription(
-      'View the private status of the active raffle.'
-    )
+    .setDescription('View the private status of the active raffle.')
 ].map((command) => command.toJSON());
 
-const rest = new REST({
-  version: '10'
-}).setToken(process.env.DISCORD_TOKEN);
+const rest = new REST({ version: '10' })
+  .setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    console.log(
-      'Registering guild slash commands...'
-    );
+    console.log('Registering guild slash commands...');
 
     await rest.put(
       Routes.applicationGuildCommands(
         process.env.CLIENT_ID,
         process.env.GUILD_ID
       ),
-      {
-        body: commands
-      }
+      { body: commands }
     );
 
-    console.log(
-      'Slash commands registered successfully.'
-    );
+    console.log('Slash commands registered successfully.');
   } catch (error) {
-    console.error(
-      'Could not register slash commands:',
-      error
-    );
+    console.error('Could not register slash commands:', error);
     process.exit(1);
   }
 })();
