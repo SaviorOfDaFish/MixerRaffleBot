@@ -676,6 +676,81 @@ const client = new Client({
   ]
 });
 
+/*
+ * Sends each new guess to the private admin channel.
+ * This does not change scoring or ticket assignment.
+ */
+async function sendGuessToAdmin({
+  raffle,
+  user,
+  rawGuess,
+  resultText,
+  placement = null,
+  tickets = []
+}) {
+  try {
+    const adminChannel = await client.channels.fetch(
+      process.env.ADMIN_CHANNEL_ID
+    );
+
+    if (
+      !adminChannel ||
+      !adminChannel.isTextBased()
+    ) {
+      console.error(
+        'ADMIN_CHANNEL_ID does not point to a text channel.'
+      );
+      return;
+    }
+
+    const totalGuesses = db
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM guesses
+        WHERE raffle_id = ?
+      `)
+      .get(raffle.id).count;
+
+    const lines = [
+      '## 🎟️ New Raffle Guess',
+      `**Player:** <@${user.id}>`,
+      `**Username:** ${user.username}`,
+      `**Guess:** ${rawGuess}`,
+      `**Result:** ${resultText}`
+    ];
+
+    if (placement !== null) {
+      lines.push(
+        `**Winning position:** #${placement}`
+      );
+    }
+
+    if (tickets.length > 0) {
+      lines.push(
+        `**Tickets:** ${tickets
+          .map((ticket) => `🎟️ ${ticket}`)
+          .join(', ')}`
+      );
+    }
+
+    lines.push(
+      `**Total guesses this raffle:** ${totalGuesses}`
+    );
+
+    await adminChannel.send({
+      content: lines.join('\n'),
+      allowedMentions: {
+        users: [user.id]
+      }
+    });
+  } catch (error) {
+    console.error(
+      'Could not send guess to admin channel:',
+      error
+    );
+  }
+}
+
 let raffleClosingCheckRunning = false;
 
 async function sendRaffleClosingMessages(
@@ -1243,6 +1318,13 @@ client.on(
         );
 
         if (!isCorrect) {
+          await sendGuessToAdmin({
+            raffle,
+            user: interaction.user,
+            rawGuess,
+            resultText: '❌ Incorrect'
+          });
+
           await interaction.reply({
             content:
               '❌ That is not the correct card. Your guess remains private, and you may try again.',
@@ -1263,6 +1345,15 @@ client.on(
           award.type ===
           'already_won'
         ) {
+          await sendGuessToAdmin({
+            raffle,
+            user: interaction.user,
+            rawGuess,
+            resultText: '✅ Correct — already earned tickets',
+            placement: award.placement,
+            tickets: award.tickets
+          });
+
           await interaction.reply({
             content:
               '✅ You already solved this week’s card and your tickets are safely recorded:\n' +
@@ -1282,6 +1373,13 @@ client.on(
           award.type ===
           'correct_no_tickets'
         ) {
+          await sendGuessToAdmin({
+            raffle,
+            user: interaction.user,
+            rawGuess,
+            resultText: '✅ Correct — all ticket positions already filled'
+          });
+
           await interaction.reply({
             content:
               '✅ You identified the correct card! All five ticket-winning positions have already been claimed. Please keep the answer secret until the reveal.',
@@ -1290,6 +1388,15 @@ client.on(
 
           return;
         }
+
+        await sendGuessToAdmin({
+          raffle,
+          user: interaction.user,
+          rawGuess,
+          resultText: '✅ Correct — tickets awarded',
+          placement: award.placement,
+          tickets: award.tickets
+        });
 
         const placementText =
           award.placement === 1
@@ -1408,6 +1515,31 @@ client.on(
           `)
           .get(raffle.id).count;
 
+        const recentGuesses = db
+          .prepare(`
+            SELECT
+              discord_username,
+              raw_guess,
+              is_correct,
+              submitted_at
+            FROM guesses
+            WHERE raffle_id = ?
+            ORDER BY id DESC
+            LIMIT 10
+          `)
+          .all(raffle.id);
+
+        const recentGuessLines =
+          recentGuesses.length > 0
+            ? recentGuesses
+                .map(
+                  (guess) =>
+                    `${guess.is_correct ? '✅' : '❌'} ` +
+                    `**${guess.discord_username}:** ${guess.raw_guess}`
+                )
+                .join('\n')
+            : 'No guesses have been submitted yet.';
+
         const winnerLines =
           winners.length > 0
             ? winners
@@ -1441,6 +1573,8 @@ client.on(
               "cccc, LLLL d 'at' h:mm a ZZZZ"
             )}\n\n` +
             `${winnerLines}\n\n` +
+            `### Recent Guesses\n` +
+            `${recentGuessLines}\n\n` +
             `**Next available physical ticket:** ${getNextTicketNumber()}`,
           flags: MessageFlags.Ephemeral
         });
